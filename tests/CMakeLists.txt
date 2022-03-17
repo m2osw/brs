@@ -16,33 +16,40 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-cmake_minimum_required(VERSION 3.10.2)
-
-project(brs_project)
-
-find_package(LibExcept        REQUIRED)
-find_package(SnapCMakeModules REQUIRED)
-find_package(SnapDev          REQUIRED)
-find_package(SnapLogger       REQUIRED)
-
-SnapGetVersion(BRS ${CMAKE_CURRENT_SOURCE_DIR})
-
-enable_language(CXX)
-
-# Find includes in corresponding build directories
-set(CMAKE_INCLUDE_CURRENT_DIR ON)
-
-include_directories(
-    ${PROJECT_SOURCE_DIR}
-    ${PROJECT_BINARY_DIR}
-)
-
 ##
-## Compiling
+## edhttp unittest
 ##
-add_subdirectory(brs)               # The Binary Recursive Serialization library
-add_subdirectory(cmake)             # CMake Config
-add_subdirectory(tests)             # Unit Tests
-add_subdirectory(doc)               # Documentation
+project(unittest)
 
-# vim: ts=4 sw=4 et nocindent
+find_package(SnapCatch2)
+
+if(SnapCatch2_FOUND)
+
+    add_executable(${PROJECT_NAME}
+        catch_main.cpp
+
+        catch_brs.cpp
+    )
+
+    target_include_directories(${PROJECT_NAME}
+        PUBLIC
+            ${CMAKE_BINARY_DIR}
+            ${PROJECT_SOURCE_DIR}
+            ${SNAPCATCH2_INCLUDE_DIRS}
+            ${LIBEXCEPT_INCLUDE_DIRS}
+    )
+
+    target_link_libraries(${PROJECT_NAME}
+        brs
+        ${SNAPCATCH2_LIBRARIES}
+    )
+
+    add_test(unittests ${PROJECT_NAME})
+
+else(SnapCatch2_FOUND)
+
+    message("snapcatch2 not found... no test will be built.")
+
+endif(SnapCatch2_FOUND)
+
+# vim: ts=4 sw=4 et

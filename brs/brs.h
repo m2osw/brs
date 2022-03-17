@@ -19,14 +19,21 @@
 // Snap Websites Servers -- create a feed where you can write an email
 #pragma once
 
-// snapdev
+// libexcept
 //
 #include    <libexcept/exception.h>
+
+
+// snapdev
+//
+#include    <snapdev/callback_manager.h>
+
 
 // C++
 //
 #include    <map>
 #include    <memory>
+#include    <vector>
 
 
 
@@ -40,31 +47,39 @@ DECLARE_LOGIC_ERROR(brs_logic_error);
 DECLARE_OUT_OF_RANGE(brs_out_of_range);
 
 
-typedef std::uint32_t           magic_t;
-typedef std::uint8_t            version_t;
-typedef std::string             name_t;
-std::vector<std::uint8_t>       buffer_t;
+typedef std::uint32_t               magic_t;
+typedef std::uint8_t                version_t;
+typedef std::string                 name_t;
+typedef std::vector<std::uint8_t>   buffer_t;
 
 struct hunk_sizes_t
 {
-    std::uin32_t    f_name : 8;
-    std::uin32_t    f_hunk : 24;
+    std::uint32_t   f_name : 8;
+    std::uint32_t   f_hunk : 24;
 };
 
 
 constexpr version_t const       BRS_ROOT = 0;       // indicate root buffer
 constexpr version_t const       BRS_VERSION = 1;    // version of the format
+
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
 constexpr magic_t const         BRS_MAGIC = (('B' << 24) | ('R' << 16) | ('S' << 8) | (BRS_VERSION << 0));
+#else
+constexpr magic_t const         BRS_MAGIC = (('B' << 0) | ('R' << 8) | ('S' << 16) | (BRS_VERSION << 24));
+#endif
 
 
 
-template<typename T>
+template<class T>
 void add_value(buffer_t & buffer, name_t name, T const * ptr, std::size_t size)
 {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
     hunk_sizes_t hunk_sizes = {
-        f_name = name.length(),
-        f_hunk = size,
+        .f_name = static_cast<std::uint8_t>(name.length()),
+        .f_hunk = static_cast<std::uint32_t>(size & 0x00FFFFFF),
     };
+#pragma GCC diagnostic pop
 
     if(hunk_sizes.f_name != name.length()
     || hunk_sizes.f_hunk != size)
@@ -81,8 +96,8 @@ void add_value(buffer_t & buffer, name_t name, T const * ptr, std::size_t size)
 
     buffer.insert(
               buffer.end()
-            , reinterpret_cast<buffer_t::value_type const *>(&name.c_str())
-            , reinterpret_cast<buffer_t::value_type const *>(&name.c_str()) + size.f_name);
+            , reinterpret_cast<buffer_t::value_type const *>(name.c_str())
+            , reinterpret_cast<buffer_t::value_type const *>(name.c_str()) + hunk_sizes.f_name);
 
     buffer.insert(
               buffer.end()
@@ -118,7 +133,7 @@ void add_value<std::string>(buffer_t & buffer, name_t name, std::string const & 
 
 
 template<>
-void add_value<buffer_t>(buffer_t & buffer, name_t name, buffer_t value)
+void add_value<buffer_t>(buffer_t & buffer, name_t name, buffer_t const & value)
 {
     add_value(buffer, name, value.data(), value.size());
 }
@@ -154,7 +169,7 @@ public:
 
     virtual ~brs_object() {}
 
-    bool process_chunk(
+    virtual bool process_chunk(
                   name_t const & name
                 , std::uint8_t const * data
                 , std::size_t size) = 0;
@@ -215,12 +230,12 @@ public:
 
     std::string to_string(std::uint8_t const * data, std::size_t size)
     {
-        return std::string(reinterpret_cast<char const *>(data, size);
+        return std::string(reinterpret_cast<char const *>(data, size));
     }
 
     buffer_t to_buffer(std::uint8_t const * data, std::size_t size)
     {
-        return buffer_t(reinterpret_cast<std::uint64_t const *>(data), size);
+        return buffer_t(data, data + size);
     }
 
 private:
@@ -255,19 +270,23 @@ private:
  */
 bool unserialize_buffer(
           buffer_t const & buffer
-        , snapdev::callback_manager<brs_object> & callback
+        , snapdev::callback_manager<brs_object::pointer_t> & callback
         , bool includes_magic)
 {
     std::size_t pos(0);
 
     if(includes_magic)
     {
-        if(sizeof(magic) > buffer.size())
+        if(sizeof(magic_t) > buffer.size())
         {
             return false;
         }
 
-        magic_t const magic((buffer[0] << 24) | (buffer[1] << 16) | (buffer[2] << 8) | (buffer[0] << 0));
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+        magic_t const magic((buffer[0] << 24) | (buffer[1] << 16) | (buffer[2] << 8) | (buffer[3] << 0));
+#else
+        magic_t const magic((buffer[0] << 0) | (buffer[1] << 8) | (buffer[2] << 16) | (buffer[3] << 24));
+#endif
         pos += sizeof(magic_t);
 
         if(magic != BRS_MAGIC)
@@ -278,23 +297,28 @@ bool unserialize_buffer(
 
     for(;;)
     {
-        if(pos + sizeof(name_t) > buffer.size())
+        if(pos + sizeof(hunk_sizes_t) > buffer.size())
         {
-            return pos + sizeof(name_t) == buffer.size();
+            return pos == buffer.size();
         }
 
         hunk_sizes_t const * hunk_sizes(reinterpret_cast<hunk_sizes_t const *>(buffer.data() + pos));
         pos += sizeof(hunk_sizes_t);
 
-        hunk_size_t const * name(std::string(
-                      reinterpret_cast<hunk_size_t const *>(buffer.data() + pos)
-                    , hunk_sizes.f_name));
-        pos += hunk_sizes.f_name;
+        if(pos + hunk_sizes->f_name + hunk_sizes->f_hunk > buffer.size())
+        {
+            return false;
+        }
 
-        std::uint8_t const * ptr(reinterpret_cast<hunk_size_t const *>(buffer.data() + pos));
-        pos += hunk_sizes.f_hunk;
+        std::string const name(std::string(
+                      reinterpret_cast<char const *>(buffer.data() + pos)
+                    , hunk_sizes->f_name));
+        pos += hunk_sizes->f_name;
 
-        callback.call(&bsr_object::process_chunk, name, ptr, hunk_sizes.f_hunk);
+        std::uint8_t const * ptr(reinterpret_cast<std::uint8_t const *>(buffer.data() + pos));
+        pos += hunk_sizes->f_hunk;
+
+        callback.call(&brs_object::process_chunk, name, ptr, hunk_sizes->f_hunk);
     }
 }
 

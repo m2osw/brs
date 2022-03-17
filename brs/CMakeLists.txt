@@ -37,6 +37,7 @@ target_include_directories(${PROJECT_NAME}
 target_link_libraries(${PROJECT_NAME}
     PUBLIC
         ${SNAPLOGGER_LIBRARIES}
+        ${LIBEXCEPT_LIBRARIES}
 )
 
 set_target_properties(${PROJECT_NAME} PROPERTIES

@@ -1,0 +1,43 @@
+Source: brs
+Priority: extra
+Maintainer: Alexis Wilke <alexis@m2osw.com>
+Build-Depends: cmake,
+    debhelper,
+    doxygen,
+    graphviz,
+    snapcatch2 (>= 2.9.1.0~bionic),
+    snapcmakemodules (>= 1.0.49.0~bionic),
+    snapdev (>= 1.1.3.0~bionic),
+    snaplogger-dev (>= 1.0.0.0~bionic)
+Standards-Version: 3.9.4
+Section: utils
+Homepage: https://snapwebsites.org/
+Vcs-Git: https://github.com/m2osw/snapcpp.git
+Vcs-Browser: https://github.com/m2osw/brs
+
+Package: brs-doc
+Section: doc
+Architecture: all
+Depends: ${misc:Depends}
+Description: Documentation for the C++ Binary Recursive Serialization library.
+ This package includes documentation for the C++ BRS library funtions.
+
+Package: brs
+Section: libs
+Architecture: any
+Suggests: brs-doc
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: Development package for the C++ libmimemail project.
+ This library provides a way to send MIME emails from your C++ software.
+
+Package: brs-dev
+Section: libdevel
+Architecture: any
+Depends: brs (= ${binary:Version}), ${shlibs:Depends}, ${misc:Depends}
+Description: Development package for the C++ brs project.
+ This package handles serialization of any type of data to a binary format.
+ The format used is a simple IFF like format where some hunk include sub-hunks
+ which is different from a normal IFF, but this allows us to offer full
+ recursion.
+
+# vim: ts=4 sw=4 et

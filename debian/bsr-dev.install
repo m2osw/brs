@@ -1,0 +1,3 @@
+usr/include/libbrs
+usr/lib/libbrs.so
+usr/share/cmake/BRS/*

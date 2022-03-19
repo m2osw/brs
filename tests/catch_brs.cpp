@@ -33,6 +33,12 @@
 #include    <brs/brs.h>
 
 
+// C++
+//
+#include    <fstream>
+
+
+
 
 CATCH_TEST_CASE("basic_types", "[basic]")
 {
@@ -78,10 +84,12 @@ CATCH_TEST_CASE("basic_types", "[basic]")
             virtual bool process_chunk(
                           brs::name_t const & name
                         , std::uint8_t const * data
-                        , std::size_t size) override
+                        , std::size_t size
+                        , int index) override
             {
                 CATCH_REQUIRE(name == "orange");
                 CATCH_REQUIRE(size == 1);
+                CATCH_REQUIRE(index == -1);
                 CATCH_REQUIRE(data[0] == 33);
                 CATCH_REQUIRE(to_char(data, size) == 33);
                 return true;
@@ -141,10 +149,12 @@ CATCH_TEST_CASE("basic_types", "[basic]")
             virtual bool process_chunk(
                           brs::name_t const & name
                         , std::uint8_t const * data
-                        , std::size_t size) override
+                        , std::size_t size
+                        , int index) override
             {
                 CATCH_REQUIRE(name == "orange");
                 CATCH_REQUIRE(size == 1);
+                CATCH_REQUIRE(index == -1);
                 CATCH_REQUIRE(static_cast<signed char>(data[0]) == -43);
                 CATCH_REQUIRE(to_schar(data, size) == -43);
                 return true;
@@ -204,10 +214,12 @@ CATCH_TEST_CASE("basic_types", "[basic]")
             virtual bool process_chunk(
                           brs::name_t const & name
                         , std::uint8_t const * data
-                        , std::size_t size) override
+                        , std::size_t size
+                        , int index) override
             {
                 CATCH_REQUIRE(name == "orange");
                 CATCH_REQUIRE(size == 1);
+                CATCH_REQUIRE(index == -1);
                 CATCH_REQUIRE(static_cast<unsigned char>(data[0]) == 200);
                 CATCH_REQUIRE(to_uchar(data, size) == 200);
                 return true;
@@ -274,11 +286,13 @@ CATCH_TEST_CASE("basic_types", "[basic]")
             virtual bool process_chunk(
                           brs::name_t const & name
                         , std::uint8_t const * data
-                        , std::size_t size) override
+                        , std::size_t size
+                        , int index) override
             {
+                CATCH_REQUIRE(size == 2);
+                CATCH_REQUIRE(index == -1);
                 if(name == "purple")
                 {
-                    CATCH_REQUIRE(size == 2);
 #if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
                     CATCH_REQUIRE(data[0] * 256 + data[1] == 3003);
 #else
@@ -289,7 +303,6 @@ CATCH_TEST_CASE("basic_types", "[basic]")
                 }
                 else if(name == "black")
                 {
-                    CATCH_REQUIRE(size == 2);
 #if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
                     CATCH_REQUIRE(data[0] * 256 + data[1] == 65001);
 #else
@@ -373,17 +386,18 @@ CATCH_TEST_CASE("basic_types", "[basic]")
             virtual bool process_chunk(
                           brs::name_t const & name
                         , std::uint8_t const * data
-                        , std::size_t size) override
+                        , std::size_t size
+                        , int index) override
             {
+                CATCH_REQUIRE(size == 4);
+                CATCH_REQUIRE(index == -1);
                 if(name == "red")
                 {
-                    CATCH_REQUIRE(size == 4);
                     std::int32_t const value(to_int32(data, size));
                     CATCH_REQUIRE(value == f_red);
                 }
                 else if(name == "blue")
                 {
-                    CATCH_REQUIRE(size == 4);
                     std::uint32_t const value(to_uint32(data, size));
                     CATCH_REQUIRE(value == f_blue);
                 }
@@ -467,17 +481,18 @@ CATCH_TEST_CASE("basic_types", "[basic]")
             virtual bool process_chunk(
                           brs::name_t const & name
                         , std::uint8_t const * data
-                        , std::size_t size) override
+                        , std::size_t size
+                        , int index) override
             {
+                CATCH_REQUIRE(size == 8);
+                CATCH_REQUIRE(index == -1);
                 if(name == "white")
                 {
-                    CATCH_REQUIRE(size == 8);
                     std::int64_t const value(to_int64(data, size));
                     CATCH_REQUIRE(value == f_white);
                 }
                 else if(name == "gray")
                 {
-                    CATCH_REQUIRE(size == 8);
                     std::uint64_t const value(to_uint64(data, size));
                     CATCH_REQUIRE(value == f_gray);
                 }
@@ -566,8 +581,10 @@ CATCH_TEST_CASE("basic_types", "[basic]")
             virtual bool process_chunk(
                           brs::name_t const & name
                         , std::uint8_t const * data
-                        , std::size_t size) override
+                        , std::size_t size
+                        , int index) override
             {
+                CATCH_REQUIRE(index == -1);
                 if(name == "green")
                 {
                     CATCH_REQUIRE(size == 4);
@@ -671,10 +688,12 @@ CATCH_TEST_CASE("basic_types", "[basic]")
             virtual bool process_chunk(
                           brs::name_t const & name
                         , std::uint8_t const * data
-                        , std::size_t size) override
+                        , std::size_t size
+                        , int index) override
             {
                 CATCH_REQUIRE(name == "message");
                 CATCH_REQUIRE(size == 45);
+                CATCH_REQUIRE(index == -1);
                 std::string const value(to_string(data, size));
                 CATCH_REQUIRE(value == f_message);
                 return true;
@@ -698,6 +717,371 @@ CATCH_TEST_CASE("basic_types", "[basic]")
         //          so make sure not to use one around unserialize_buffer().
         //
         bool const r(brs::unserialize_buffer<obj::pointer_t>(buffer, cb, true));
+        CATCH_REQUIRE(r);
+    }
+
+    CATCH_SECTION("push/restore array (varying name)")
+    {
+        brs::buffer_t buffer;
+
+        brs::add_magic(buffer);
+
+        CATCH_REQUIRE(buffer.size() == sizeof(brs::magic_t));
+
+        CATCH_REQUIRE(buffer[0] == 'B');
+        CATCH_REQUIRE(buffer[1] == 'R');
+        CATCH_REQUIRE(buffer[2] == 'S');
+        CATCH_REQUIRE(buffer[3] == brs::BRS_VERSION);
+
+        // order does not matter and we can have gaps, to test that, create
+        // a map of a few values and corresponding strings
+        //
+        std::vector<int> order;
+        typedef std::map<int, std::string> value_t;
+        value_t values;
+        int index(-1);
+        for(int i(0); i < 25; ++i)
+        {
+            for(;;)
+            {
+                index = rand() % 256;
+                if(values.find(index) == values.end())
+                {
+                    break;
+                }
+            }
+            std::string str;
+            int max(rand() % 25 + 1);
+            for(int j(0); j < max; ++j)
+            {
+                str += ' ' + rand() % (0x7F - 0x20); // ASCII except controls
+            }
+            values[index] = str;
+            order.push_back(index);
+
+            brs::add_value(buffer, "str" + std::to_string(index), str, index);
+        }
+
+        // make sure it did not get smashed
+        CATCH_REQUIRE(buffer[0] == 'B');
+        CATCH_REQUIRE(buffer[1] == 'R');
+        CATCH_REQUIRE(buffer[2] == 'S');
+        CATCH_REQUIRE(buffer[3] == brs::BRS_VERSION);
+
+        struct obj
+            : public brs::brs_object
+        {
+            typedef std::shared_ptr<obj>        pointer_t;
+
+            virtual bool process_chunk(
+                          brs::name_t const & name
+                        , std::uint8_t const * data
+                        , std::size_t size
+                        , int index) override
+            {
+                CATCH_REQUIRE(index != -1);
+
+                std::string expected_name("str" + std::to_string(index));
+                CATCH_REQUIRE(name == expected_name);
+
+                CATCH_REQUIRE(size == f_values[index].length());
+
+                std::string const value(to_string(data, size));
+                CATCH_REQUIRE(value == f_values[index]);
+
+                return true;
+            }
+
+            void set_messages(value_t values)
+            {
+                f_values = values;
+            }
+
+        private:
+            value_t         f_values = value_t();
+        };
+        obj::pointer_t o(std::make_shared<obj>());
+        o->set_messages(values);
+
+        snapdev::callback_manager<obj::pointer_t> cb;
+        CATCH_REQUIRE(cb.add_callback(o) != snapdev::callback_manager<obj::pointer_t>::NULL_CALLBACK_ID);
+
+        // WARNING: we want to use CATCH_...() macros inside the callback
+        //          so make sure not to use one around unserialize_buffer().
+        //
+        bool const r(brs::unserialize_buffer<obj::pointer_t>(buffer, cb, true));
+        CATCH_REQUIRE(r);
+    }
+
+    CATCH_SECTION("push/restore array (same name)")
+    {
+        brs::buffer_t buffer;
+
+        brs::add_magic(buffer);
+
+        CATCH_REQUIRE(buffer.size() == sizeof(brs::magic_t));
+
+        CATCH_REQUIRE(buffer[0] == 'B');
+        CATCH_REQUIRE(buffer[1] == 'R');
+        CATCH_REQUIRE(buffer[2] == 'S');
+        CATCH_REQUIRE(buffer[3] == brs::BRS_VERSION);
+
+        // order does not matter and we can have gaps, to test that, create
+        // a map of a few values and corresponding strings
+        //
+        std::vector<int> order;
+        typedef std::map<int, std::string> value_t;
+        value_t values;
+        int index(-1);
+        for(int i(0); i < 25; ++i)
+        {
+            for(;;)
+            {
+                index = rand() % 256;
+                if(values.find(index) == values.end())
+                {
+                    break;
+                }
+            }
+            std::string str;
+            int max(rand() % 25 + 1);
+            for(int j(0); j < max; ++j)
+            {
+                str += ' ' + rand() % (0x7F - 0x20); // ASCII except controls
+            }
+            values[index] = str;
+            order.push_back(index);
+
+            brs::add_value(buffer, "unique", str, index);
+        }
+
+        // make sure it did not get smashed
+        CATCH_REQUIRE(buffer[0] == 'B');
+        CATCH_REQUIRE(buffer[1] == 'R');
+        CATCH_REQUIRE(buffer[2] == 'S');
+        CATCH_REQUIRE(buffer[3] == brs::BRS_VERSION);
+
+        struct obj
+            : public brs::brs_object
+        {
+            typedef std::shared_ptr<obj>        pointer_t;
+
+            virtual bool process_chunk(
+                          brs::name_t const & name
+                        , std::uint8_t const * data
+                        , std::size_t size
+                        , int index) override
+            {
+                CATCH_REQUIRE(index != -1);
+
+                CATCH_REQUIRE(name == "unique");
+
+                CATCH_REQUIRE(size == f_values[index].length());
+
+                std::string const value(to_string(data, size));
+                CATCH_REQUIRE(value == f_values[index]);
+
+                return true;
+            }
+
+            void set_messages(value_t values)
+            {
+                f_values = values;
+            }
+
+        private:
+            value_t         f_values = value_t();
+        };
+        obj::pointer_t o(std::make_shared<obj>());
+        o->set_messages(values);
+
+        snapdev::callback_manager<obj::pointer_t> cb;
+        CATCH_REQUIRE(cb.add_callback(o) != snapdev::callback_manager<obj::pointer_t>::NULL_CALLBACK_ID);
+
+        // WARNING: we want to use CATCH_...() macros inside the callback
+        //          so make sure not to use one around unserialize_buffer().
+        //
+        bool const r(brs::unserialize_buffer<obj::pointer_t>(buffer, cb, true));
+        CATCH_REQUIRE(r);
+    }
+
+    CATCH_SECTION("push/restore buffers")
+    {
+        class t1
+            : public brs::brs_object
+        {
+        public:
+            void serialize(brs::buffer_t & buffer) const
+            {
+                brs::add_value(buffer, "name", f_name);
+            }
+
+            virtual bool process_chunk(
+                          brs::name_t const & name
+                        , std::uint8_t const * data
+                        , std::size_t size
+                        , int index) override
+            {
+                if(name == "name")
+                {
+                    CATCH_REQUIRE(index == -1);
+                    CATCH_REQUIRE(f_name == to_string(data, size));
+                }
+                else
+                {
+                    CATCH_REQUIRE(name == "?unknown?");
+                }
+
+                return true;
+            }
+
+            void set_name(std::string const & name)
+            {
+                f_name = name;
+            }
+
+        private:
+            std::string     f_name = "--undefined--";
+        };
+
+        class t2
+            : public brs::brs_object
+        {
+        public:
+            void serialize(brs::buffer_t & buffer) const
+            {
+                for(int idx(0); idx < 10; ++idx)
+                {
+                    brs::add_value(buffer, "size", f_sizes[idx], idx);
+                }
+            }
+
+            virtual bool process_chunk(
+                          brs::name_t const & name
+                        , std::uint8_t const * data
+                        , std::size_t size
+                        , int index) override
+            {
+                if(name == "size")
+                {
+                    CATCH_REQUIRE(index < 10);
+                    CATCH_REQUIRE(f_sizes[index] == to_int32(data, size));
+                }
+                else
+                {
+                    CATCH_REQUIRE(name == "?unknown?");
+                }
+
+                return true;
+            }
+
+        private:
+            std::int32_t    f_sizes[10] = {
+                    rand(), rand(), rand(), rand(), rand(),
+                    rand(), rand(), rand(), rand(), rand(),
+                };
+        };
+
+        // c includes an array of t1's and one t2
+        class c
+            : public brs::brs_object
+        {
+        public:
+            c()
+            {
+                int max(rand() % 5 + 3);
+                for(int idx(0); idx < max; ++idx)
+                {
+                    std::string name;
+                    int len(rand() % 25 + 10);
+                    for(int j(0); j < len; ++j)
+                    {
+                        name += 'a' + rand() % 26;
+                    }
+                    t1 t;
+                    t.set_name(name);
+                    f_t1.push_back(t);
+                }
+            }
+
+            void serialize(brs::buffer_t & buffer) const
+            {
+                brs::add_value(buffer, "count", f_count);
+
+                int const max(static_cast<int>(f_t1.size()));
+                for(int idx(0); idx < max; ++idx)
+                {
+                    brs::buffer_t b1;
+                    f_t1[idx].serialize(b1);
+                    brs::add_value(buffer, "t1_array", b1, idx);
+                }
+
+                brs::buffer_t b2;
+                f_t2.serialize(b2);
+                brs::add_value(buffer, "t2", b2);
+            }
+
+            virtual bool process_chunk(
+                          brs::name_t const & name
+                        , std::uint8_t const * data
+                        , std::size_t size
+                        , int index) override
+            {
+                if(name == "count")
+                {
+                    CATCH_REQUIRE(f_count == to_int32(data, size));
+                }
+                else if(name == "t1_array")
+                {
+                    CATCH_REQUIRE(static_cast<std::size_t>(index) < f_t1.size());
+                    snapdev::callback_manager<t1> cb;
+                    CATCH_REQUIRE(cb.add_callback(f_t1[index]) != snapdev::callback_manager<t1>::NULL_CALLBACK_ID);
+                    brs::buffer_t sub_buffer(data, data + size);
+                    bool const r(brs::unserialize_buffer<t1>(sub_buffer, cb, false));
+                    CATCH_REQUIRE(r);
+                }
+                else if(name == "t2")
+                {
+                    brs::buffer_t sub_buffer(data, data + size);
+                    snapdev::callback_manager<t2> cb;
+                    CATCH_REQUIRE(cb.add_callback(f_t2) != snapdev::callback_manager<t2>::NULL_CALLBACK_ID);
+                    bool const r(brs::unserialize_buffer<t2>(sub_buffer, cb, false));
+                    CATCH_REQUIRE(r);
+                }
+                else
+                {
+                    CATCH_REQUIRE(name == "?unknown?");
+                }
+
+                return true;
+            }
+
+        private:
+            int                 f_count = rand();
+            std::vector<t1>     f_t1 = std::vector<t1>();
+            t2                  f_t2 = t2();
+        };
+
+        c o;
+
+        brs::buffer_t buffer;
+        brs::add_magic(buffer);
+        o.serialize(buffer);
+
+        // verify we still have the header as expected
+        //
+        CATCH_REQUIRE(buffer[0] == 'B');
+        CATCH_REQUIRE(buffer[1] == 'R');
+        CATCH_REQUIRE(buffer[2] == 'S');
+        CATCH_REQUIRE(buffer[3] == brs::BRS_VERSION);
+
+        snapdev::callback_manager<c> cb;
+        CATCH_REQUIRE(cb.add_callback(o) != snapdev::callback_manager<c>::NULL_CALLBACK_ID);
+
+        // WARNING: we want to use CATCH_...() macros inside the callback
+        //          so make sure not to use one around unserialize_buffer().
+        //
+        bool const r(brs::unserialize_buffer<c>(buffer, cb, true));
         CATCH_REQUIRE(r);
     }
 }

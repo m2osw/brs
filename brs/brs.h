@@ -55,7 +55,8 @@ typedef std::vector<std::uint8_t>   buffer_t;
 struct hunk_sizes_t
 {
     std::uint32_t   f_name : 8;
-    std::uint32_t   f_hunk : 24;
+    std::uint32_t   f_hunk : 23;
+    std::uint32_t   f_index : 1;
 };
 
 
@@ -71,18 +72,20 @@ constexpr magic_t const         BRS_MAGIC = (('B' << 0) | ('R' << 8) | ('S' << 1
 
 
 template<class T>
-void add_value(buffer_t & buffer, name_t name, T const * ptr, std::size_t size)
+void add_value(buffer_t & buffer, name_t name, T const * ptr, std::size_t size, int index = -1)
 {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
     hunk_sizes_t hunk_sizes = {
         .f_name = static_cast<std::uint8_t>(name.length()),
         .f_hunk = static_cast<std::uint32_t>(size & 0x00FFFFFF),
+        .f_index = static_cast<std::uint32_t>(index >= 0 ? 1 : 0),
     };
 #pragma GCC diagnostic pop
 
     if(hunk_sizes.f_name != name.length()
-    || hunk_sizes.f_hunk != size)
+    || hunk_sizes.f_hunk != size
+    || index >= (1 << 16))
     {
         throw brs_out_of_range("name or hunk too large");
     }
@@ -93,6 +96,15 @@ void add_value(buffer_t & buffer, name_t name, T const * ptr, std::size_t size)
               buffer.end()
             , reinterpret_cast<buffer_t::value_type const *>(&hunk_sizes)
             , reinterpret_cast<buffer_t::value_type const *>(&hunk_sizes + 1));
+
+    if(hunk_sizes.f_index == 1)
+    {
+        std::uint16_t idx(static_cast<std::uint16_t>(index));
+        buffer.insert(
+                  buffer.end()
+                , reinterpret_cast<buffer_t::value_type const *>(&idx)
+                , reinterpret_cast<buffer_t::value_type const *>(&idx + 1));
+    }
 
     buffer.insert(
               buffer.end()
@@ -119,23 +131,23 @@ void add_value(buffer_t & buffer, name_t name, T const * ptr, std::size_t size)
  * \param[in] value  The value to be saved with that name.
  */
 template<typename T>
-void add_value(buffer_t & buffer, name_t name, T const & value)
+void add_value(buffer_t & buffer, name_t name, T const & value, int index = -1)
 {
-    add_value(buffer, name, &value, sizeof(value));
+    add_value(buffer, name, &value, sizeof(value), index);
 }
 
 
 template<>
-void add_value<std::string>(buffer_t & buffer, name_t name, std::string const & value)
+void add_value<std::string>(buffer_t & buffer, name_t name, std::string const & value, int index)
 {
-    add_value(buffer, name, value.c_str(), value.length());
+    add_value(buffer, name, value.c_str(), value.length(), index);
 }
 
 
 template<>
-void add_value<buffer_t>(buffer_t & buffer, name_t name, buffer_t const & value)
+void add_value<buffer_t>(buffer_t & buffer, name_t name, buffer_t const & value, int index)
 {
-    add_value(buffer, name, value.data(), value.size());
+    add_value(buffer, name, value.data(), value.size(), index);
 }
 
 
@@ -172,7 +184,8 @@ public:
     virtual bool process_chunk(
                   name_t const & name
                 , std::uint8_t const * data
-                , std::size_t size) = 0;
+                , std::size_t size
+                , int index) = 0;
 
     char to_char(std::uint8_t const * data, std::size_t size)
     {
@@ -314,6 +327,7 @@ bool unserialize_buffer(
         }
     }
 
+    int index(-1);
     for(;;)
     {
         if(pos + sizeof(hunk_sizes_t) > buffer.size())
@@ -323,6 +337,23 @@ bool unserialize_buffer(
 
         hunk_sizes_t const * hunk_sizes(reinterpret_cast<hunk_sizes_t const *>(buffer.data() + pos));
         pos += sizeof(hunk_sizes_t);
+
+        if(hunk_sizes->f_index == 1)
+        {
+            if(pos + sizeof(std::uint16_t) > buffer.size())
+            {
+                return false;
+            }
+
+            std::uint16_t const * idx(reinterpret_cast<std::uint16_t const *>(buffer.data() + pos));
+            pos += sizeof(std::uint16_t);
+
+            index = *idx;
+        }
+        else
+        {
+            index = -1;
+        }
 
         if(pos + hunk_sizes->f_name + hunk_sizes->f_hunk > buffer.size())
         {
@@ -337,7 +368,7 @@ bool unserialize_buffer(
         std::uint8_t const * ptr(reinterpret_cast<std::uint8_t const *>(buffer.data() + pos));
         pos += hunk_sizes->f_hunk;
 
-        callback.call(&brs_object::process_chunk, name, ptr, hunk_sizes->f_hunk);
+        callback.call(&brs_object::process_chunk, name, ptr, hunk_sizes->f_hunk, index);
     }
 }
 

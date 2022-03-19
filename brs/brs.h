@@ -194,43 +194,61 @@ public:
 
     std::int16_t to_int16(std::uint8_t const * data, std::size_t size)
     {
-        verify_size(sizeof(int), size);
+        verify_size(sizeof(std::int16_t), size);
         return *reinterpret_cast<std::int16_t const *>(data);
     }
 
     std::uint16_t to_uint16(std::uint8_t const * data, std::size_t size)
     {
-        verify_size(sizeof(int), size);
+        verify_size(sizeof(std::uint16_t), size);
         return *reinterpret_cast<std::uint16_t const *>(data);
     }
 
     std::int32_t to_int32(std::uint8_t const * data, std::size_t size)
     {
-        verify_size(sizeof(int), size);
+        verify_size(sizeof(std::int32_t), size);
         return *reinterpret_cast<std::int32_t const *>(data);
     }
 
     std::uint32_t to_uint32(std::uint8_t const * data, std::size_t size)
     {
-        verify_size(sizeof(int), size);
+        verify_size(sizeof(std::uint32_t), size);
         return *reinterpret_cast<std::uint32_t const *>(data);
     }
 
     std::int64_t to_int64(std::uint8_t const * data, std::size_t size)
     {
-        verify_size(sizeof(int), size);
+        verify_size(sizeof(std::int64_t), size);
         return *reinterpret_cast<std::int64_t const *>(data);
     }
 
     std::uint64_t to_uint64(std::uint8_t const * data, std::size_t size)
     {
-        verify_size(sizeof(int), size);
+        verify_size(sizeof(std::uint64_t), size);
         return *reinterpret_cast<std::uint64_t const *>(data);
+    }
+
+    float to_float(std::uint8_t const * data, std::size_t size)
+    {
+        verify_size(sizeof(float), size);
+        return *reinterpret_cast<float const *>(data);
+    }
+
+    double to_double(std::uint8_t const * data, std::size_t size)
+    {
+        verify_size(sizeof(double), size);
+        return *reinterpret_cast<double const *>(data);
+    }
+
+    long double to_long_double(std::uint8_t const * data, std::size_t size)
+    {
+        verify_size(sizeof(long double), size);
+        return *reinterpret_cast<long double const *>(data);
     }
 
     std::string to_string(std::uint8_t const * data, std::size_t size)
     {
-        return std::string(reinterpret_cast<char const *>(data, size));
+        return std::string(reinterpret_cast<char const *>(data), size);
     }
 
     buffer_t to_buffer(std::uint8_t const * data, std::size_t size)
@@ -268,9 +286,10 @@ private:
  *
  * \return true if the unserialization succeeded, false otherwise.
  */
+template<typename T>
 bool unserialize_buffer(
           buffer_t const & buffer
-        , snapdev::callback_manager<brs_object::pointer_t> & callback
+        , snapdev::callback_manager<T> & callback
         , bool includes_magic)
 {
     std::size_t pos(0);

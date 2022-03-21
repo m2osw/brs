@@ -26,11 +26,12 @@
 
 // snapdev
 //
-#include    <snapdev/callback_manager.h>
+#include    <snapdev/is_vector.h>
 
 
 // C++
 //
+#include    <functional>
 #include    <map>
 #include    <memory>
 #include    <vector>
@@ -46,237 +47,393 @@ DECLARE_LOGIC_ERROR(brs_logic_error);
 
 DECLARE_OUT_OF_RANGE(brs_out_of_range);
 
+DECLARE_MAIN_EXCEPTION(brs_error);
+
+DECLARE_EXCEPTION(brs_error, brs_cannot_be_empty);
+DECLARE_EXCEPTION(brs_error, brs_magic_missing);
+DECLARE_EXCEPTION(brs_error, brs_magic_unsupported);
+DECLARE_EXCEPTION(brs_error, brs_map_name_cannot_be_empty);
+DECLARE_EXCEPTION(brs_error, brs_unknown_type);
+
 
 typedef std::uint32_t               magic_t;
 typedef std::uint8_t                version_t;
 typedef std::string                 name_t;
-typedef std::vector<std::uint8_t>   buffer_t;
+//typedef std::vector<std::uint8_t>   buffer_t;
+
+typedef std::uint32_t               type_t;
+
+constexpr type_t const              TYPE_FIELD = 0;     // regular name=value
+constexpr type_t const              TYPE_ARRAY = 1;     // item in an array (includes a 16 bit index)
+constexpr type_t const              TYPE_MAP = 2;       // item in a map (includes a second name)
 
 struct hunk_sizes_t
 {
-    std::uint32_t   f_name : 8;
-    std::uint32_t   f_hunk : 23;
-    std::uint32_t   f_index : 1;
+    std::uint32_t   f_type : 2;         // type of field (see TYPE_...)
+    std::uint32_t   f_name : 7;         // size of this field name (1 to 127)
+    std::uint32_t   f_hunk : 23;        // size of this field's data (up to 8Mb)
 };
 
 
 constexpr version_t const       BRS_ROOT = 0;       // indicate root buffer
 constexpr version_t const       BRS_VERSION = 1;    // version of the format
 
+
+constexpr magic_t build_magic(char endian)
+{
 #if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-constexpr magic_t const         BRS_MAGIC = (('B' << 24) | ('R' << 16) | ('S' << 8) | (BRS_VERSION << 0));
+    return ('B' << 24) | ('R' << 16) | (endian <<  8) | (static_cast<char const>(BRS_VERSION) <<  0);
 #else
-constexpr magic_t const         BRS_MAGIC = (('B' << 0) | ('R' << 8) | ('S' << 16) | (BRS_VERSION << 24));
+    return ('B' <<  0) | ('R' <<  8) | (endian << 16) | (static_cast<char const>(BRS_VERSION) << 24);
+#endif
+}
+
+constexpr magic_t const         BRS_MAGIC_BIG_ENDIAN    = build_magic('B');
+constexpr magic_t const         BRS_MAGIC_LITTLE_ENDIAN = build_magic('L');
+
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+constexpr magic_t const         BRS_MAGIC = BRS_MAGIC_BIG_ENDIAN;
+#else
+constexpr magic_t const         BRS_MAGIC = BRS_MAGIC_LITTLE_ENDIAN;
 #endif
 
 
 
-template<class T>
-void add_value(buffer_t & buffer, name_t name, T const * ptr, std::size_t size, int index = -1)
-{
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wpedantic"
-    hunk_sizes_t hunk_sizes = {
-        .f_name = static_cast<std::uint8_t>(name.length()),
-        .f_hunk = static_cast<std::uint32_t>(size & 0x00FFFFFF),
-        .f_index = static_cast<std::uint32_t>(index >= 0 ? 1 : 0),
-    };
-#pragma GCC diagnostic pop
-
-    if(hunk_sizes.f_name != name.length()
-    || hunk_sizes.f_hunk != size
-    || index >= (1 << 16))
-    {
-        throw brs_out_of_range("name or hunk too large");
-    }
-
-    // save the sizes
-    //
-    buffer.insert(
-              buffer.end()
-            , reinterpret_cast<buffer_t::value_type const *>(&hunk_sizes)
-            , reinterpret_cast<buffer_t::value_type const *>(&hunk_sizes + 1));
-
-    if(hunk_sizes.f_index == 1)
-    {
-        std::uint16_t idx(static_cast<std::uint16_t>(index));
-        buffer.insert(
-                  buffer.end()
-                , reinterpret_cast<buffer_t::value_type const *>(&idx)
-                , reinterpret_cast<buffer_t::value_type const *>(&idx + 1));
-    }
-
-    buffer.insert(
-              buffer.end()
-            , reinterpret_cast<buffer_t::value_type const *>(name.c_str())
-            , reinterpret_cast<buffer_t::value_type const *>(name.c_str()) + hunk_sizes.f_name);
-
-    buffer.insert(
-              buffer.end()
-            , reinterpret_cast<buffer_t::value_type const *>(ptr)
-            , reinterpret_cast<buffer_t::value_type const *>(ptr) + size);
-}
-
-
-/** \brief Save a basic type or struct of basic types.
+/** \brief Class to serialize your data.
  *
- * This one function saves the specified value as is. It is expected to be
- * a basic type such as an int or a double. It also supports structures
- * that are only composed of basic types. Structures and classes with
- * complex types such as a string need to be handled manually.
+ * This class is used to serialize your data. You create a serializer and
+ * then call add_value() with each one of your fields.
  *
- * \tparam T  The type of value,
- * \param[out] buffer  The buffer where the value gets saved.
- * \param[in] name  The name of the field to be saved.
- * \param[in] value  The value to be saved with that name.
+ * If you have a sub-class that you want to serialize within the parent,
+ * you want to use the recursive class like so:
+ *
+ * \code
+ *     s.add_value("type", f_type);     // regular field
+ *
+ *     // start the recursive entry
+ *     {
+ *         brs::recursive r(s, "headers");
+ *         for(auto const & h : f_headers)
+ *         {
+ *             h.serialize(s);  // serialize one header
+ *         }
+ *     }
+ *     // end the recursive entry
+ *
+ *     s.add_value("body", f_body);     // another regular field
+ * \endcode
+ *
+ * Place the brs::recursive inside a sub-block, that way when you hit the '}'
+ * it closes the sub-field automatically. This is equivalent to calling the
+ * start_subfield() and end_subfield() in a safe manner.
+ *
+ * \tparam S  The type of output stream to write the data to.
  */
-template<typename T>
-void add_value(buffer_t & buffer, name_t name, T const & value, int index = -1)
-{
-    add_value(buffer, name, &value, sizeof(value), index);
-}
-
-
-template<>
-void add_value<std::string>(buffer_t & buffer, name_t name, std::string const & value, int index)
-{
-    add_value(buffer, name, value.c_str(), value.length(), index);
-}
-
-
-template<>
-void add_value<buffer_t>(buffer_t & buffer, name_t name, buffer_t const & value, int index)
-{
-    add_value(buffer, name, value.data(), value.size(), index);
-}
-
-
-/** \brief Add the magic code at the end of the buffer.
- *
- * When creating a new buffer, you should first call this one function
- * to add the magic at the start of the buffer.
- *
- * Although you can call the function at any time, it is expected you
- * only call it at the very beginning.
- *
- * The add_magic() is separate because we want to make it easy to handle
- * sub-buffers without having to add a magic at each level.
- *
- * \param[out] buffer  The buffer where the magic is added.
- */
-void add_magic(buffer_t & buffer)
-{
-    magic_t const magic(BRS_MAGIC);
-    buffer.insert(
-              buffer.end()
-            , reinterpret_cast<buffer_t::value_type const *>(&magic)
-            , reinterpret_cast<buffer_t::value_type const *>(&magic + 1));
-}
-
-
-class brs_object
+template<typename S>
+class serializer
 {
 public:
-    typedef std::shared_ptr<brs_object>     pointer_t;
-
-    virtual ~brs_object() {}
-
-    virtual bool process_chunk(
-                  name_t const & name
-                , std::uint8_t const * data
-                , std::size_t size
-                , int index) = 0;
-
-    char to_char(std::uint8_t const * data, std::size_t size)
+    /** \brief Initialize the stream with the magic header.
+     *
+     * This function adds the magic header at the beginning of your file.
+     */
+    serializer(S & output)
+        : f_output(output)
     {
-        verify_size(sizeof(char), size);
-        return *reinterpret_cast<std::int16_t const *>(data);
+        magic_t const magic(BRS_MAGIC);
+        f_output.write(
+                  reinterpret_cast<typename S::char_type const *>(&magic)
+                , sizeof(magic));
     }
 
-    signed char to_schar(std::uint8_t const * data, std::size_t size)
+    template<typename T>
+    void add_value(name_t name, T const * ptr, std::size_t size)
     {
-        verify_size(sizeof(signed char), size);
-        return *reinterpret_cast<signed char const *>(data);
+        if(name.length() == 0)
+        {
+            throw brs_cannot_be_empty("name cannot be an empty string");
+        }
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+        hunk_sizes_t const hunk_sizes = {
+            .f_type = TYPE_FIELD,
+            .f_name = static_cast<std::uint8_t>(name.length()),
+            .f_hunk = static_cast<std::uint32_t>(size & 0x00FFFFFF),
+        };
+#pragma GCC diagnostic pop
+
+        if(hunk_sizes.f_name != name.length()
+        || hunk_sizes.f_hunk != size)
+        {
+            throw brs_out_of_range("name or hunk too large");
+        }
+
+        f_output.write(
+                  reinterpret_cast<typename S::char_type const *>(&hunk_sizes)
+                , sizeof(hunk_sizes));
+
+        f_output.write(
+                  reinterpret_cast<typename S::char_type const *>(name.c_str())
+                , hunk_sizes.f_name);
+
+        f_output.write(
+                  reinterpret_cast<typename S::char_type const *>(ptr)
+                , size);
     }
 
-    unsigned char to_uchar(std::uint8_t const * data, std::size_t size)
+    template<typename T>
+    void add_value(name_t name, int index, T const * ptr, std::size_t size)
     {
-        verify_size(sizeof(unsigned char), size);
-        return *reinterpret_cast<unsigned char const *>(data);
+        if(name.length() == 0)
+        {
+            throw brs_cannot_be_empty("name cannot be an empty string");
+        }
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+        hunk_sizes_t const hunk_sizes = {
+            .f_type = TYPE_ARRAY,
+            .f_name = static_cast<std::uint8_t>(name.length()),
+            .f_hunk = static_cast<std::uint32_t>(size & 0x00FFFFFF),
+        };
+#pragma GCC diagnostic pop
+        std::uint16_t const idx(static_cast<std::uint16_t>(index));
+
+        if(hunk_sizes.f_name != name.length()
+        || hunk_sizes.f_hunk != size
+        || index != idx)
+        {
+            throw brs_out_of_range("name, index, or hunk too large");
+        }
+
+        f_output.write(
+                  reinterpret_cast<typename S::char_type const *>(&hunk_sizes)
+                , sizeof(hunk_sizes));
+
+        f_output.write(
+                  reinterpret_cast<typename S::char_type const *>(&idx)
+                , sizeof(idx));
+
+        f_output.write(
+                  reinterpret_cast<typename S::char_type const *>(name.c_str())
+                , hunk_sizes.f_name);
+
+        f_output.write(
+                  reinterpret_cast<typename S::char_type const *>(ptr)
+                , size);
     }
 
-    std::int16_t to_int16(std::uint8_t const * data, std::size_t size)
+    template<typename T>
+    void add_value(name_t name, name_t sub_name, T const * ptr, std::size_t size)
     {
-        verify_size(sizeof(std::int16_t), size);
-        return *reinterpret_cast<std::int16_t const *>(data);
+        if(name.empty())
+        {
+            throw brs_cannot_be_empty("name cannot be an empty string");
+        }
+
+        if(sub_name.empty())
+        {
+            throw brs_cannot_be_empty("sub-name cannot be an empty string");
+        }
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+        hunk_sizes_t const hunk_sizes = {
+            .f_type = TYPE_MAP,
+            .f_name = static_cast<std::uint8_t>(name.length()),
+            .f_hunk = static_cast<std::uint32_t>(size & 0x00FFFFFF),
+        };
+#pragma GCC diagnostic pop
+        std::uint8_t const len(static_cast<std::uint8_t>(sub_name.length()));
+
+        if(hunk_sizes.f_name != name.length()
+        || hunk_sizes.f_hunk != size
+        || sub_name.length() >= (1 << 8))
+        {
+            throw brs_out_of_range("name, sub-name, or hunk too large");
+        }
+
+        f_output.write(
+                  reinterpret_cast<typename S::char_type const *>(&hunk_sizes)
+                , sizeof(hunk_sizes));
+
+        f_output.write(
+                  reinterpret_cast<typename S::char_type const *>(&len)
+                , sizeof(len));
+
+        f_output.write(
+                  reinterpret_cast<typename S::char_type const *>(sub_name.c_str())
+                , len);
+
+        f_output.write(
+                  reinterpret_cast<typename S::char_type const *>(name.c_str())
+                , hunk_sizes.f_name);
+
+        f_output.write(
+                  reinterpret_cast<typename S::char_type const *>(ptr)
+                , size);
     }
 
-    std::uint16_t to_uint16(std::uint8_t const * data, std::size_t size)
+    /** \brief Save a basic type or struct of basic types.
+     *
+     * This one function saves the specified value as is. It is expected to be
+     * a basic type such as an int or a double. It also supports structures
+     * that are only composed of basic types. Structures and classes with
+     * complex types such as a string need to be handled manually.
+     *
+     * \tparam T  The type of value,
+     * \param[out] buffer  The buffer where the value gets saved.
+     * \param[in] name  The name of the field to be saved.
+     * \param[in] value  The value to be saved with that name.
+     */
+    template<typename T>
+    void add_value(name_t name, T const & value)
     {
-        verify_size(sizeof(std::uint16_t), size);
-        return *reinterpret_cast<std::uint16_t const *>(data);
+        add_value(name, &value, sizeof(value));
     }
 
-    std::int32_t to_int32(std::uint8_t const * data, std::size_t size)
+
+    template<typename T>
+    void add_value(name_t name, int index, T const & value)
     {
-        verify_size(sizeof(std::int32_t), size);
-        return *reinterpret_cast<std::int32_t const *>(data);
+        add_value(name, index, &value, sizeof(value));
     }
 
-    std::uint32_t to_uint32(std::uint8_t const * data, std::size_t size)
+
+    template<typename T>
+    typename std::enable_if<std::is_same<T, typename std::string>::value
+            , void>::type
+    add_value(name_t name, name_t sub_name, T const & value)
     {
-        verify_size(sizeof(std::uint32_t), size);
-        return *reinterpret_cast<std::uint32_t const *>(data);
+        add_value(name, sub_name, &value, sizeof(value));
     }
 
-    std::int64_t to_int64(std::uint8_t const * data, std::size_t size)
+
+    void add_value(name_t name, std::string const & value)
     {
-        verify_size(sizeof(std::int64_t), size);
-        return *reinterpret_cast<std::int64_t const *>(data);
+        add_value(name, value.c_str(), value.length());
     }
 
-    std::uint64_t to_uint64(std::uint8_t const * data, std::size_t size)
+
+    void add_value(name_t name, int index, std::string const & value)
     {
-        verify_size(sizeof(std::uint64_t), size);
-        return *reinterpret_cast<std::uint64_t const *>(data);
+        add_value(name, index, value.c_str(), value.length());
     }
 
-    float to_float(std::uint8_t const * data, std::size_t size)
+
+    void add_value(name_t name, name_t sub_name, std::string const & value)
     {
-        verify_size(sizeof(float), size);
-        return *reinterpret_cast<float const *>(data);
+        add_value(name, sub_name, value.c_str(), value.length());
     }
 
-    double to_double(std::uint8_t const * data, std::size_t size)
+
+    template<typename T>
+    typename std::enable_if<snapdev::is_vector<T>::value
+            , void>::type
+    add_value(name_t name, std::vector<T> & value)
     {
-        verify_size(sizeof(double), size);
-        return *reinterpret_cast<double const *>(data);
+        add_value(name, value.data(), value.size());
     }
 
-    long double to_long_double(std::uint8_t const * data, std::size_t size)
+
+    void start_subfield(name_t name)
     {
-        verify_size(sizeof(long double), size);
-        return *reinterpret_cast<long double const *>(data);
+        if(name.empty())
+        {
+            throw brs_cannot_be_empty("name cannot be an empty string");
+        }
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+        hunk_sizes_t const hunk_sizes = {
+            .f_type = TYPE_FIELD,
+            .f_name = static_cast<std::uint8_t>(name.length()),
+            .f_hunk = 0,
+        };
+#pragma GCC diagnostic pop
+
+        if(hunk_sizes.f_name != name.length())
+        {
+            throw brs_out_of_range("name too large");
+        }
+
+        f_output.write(
+                  reinterpret_cast<typename S::char_type const *>(&hunk_sizes)
+                , sizeof(hunk_sizes));
+
+        f_output.write(
+                  reinterpret_cast<typename S::char_type const *>(name.c_str())
+                , hunk_sizes.f_name);
     }
 
-    std::string to_string(std::uint8_t const * data, std::size_t size)
+
+    void end_subfield()
     {
-        return std::string(reinterpret_cast<char const *>(data), size);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+        hunk_sizes_t const hunk_sizes = {
+            .f_type = TYPE_FIELD,
+            .f_name = 0,
+            .f_hunk = 0,
+        };
+#pragma GCC diagnostic pop
+
+        f_output.write(
+                  reinterpret_cast<typename S::char_type const *>(&hunk_sizes)
+                , sizeof(hunk_sizes));
     }
 
-    buffer_t to_buffer(std::uint8_t const * data, std::size_t size)
+
+private:
+    S &         f_output = S();
+};
+
+
+template<typename S>
+class recursive
+{
+public:
+    recursive(serializer<S> & s, name_t name)
+        : f_serializer(s)
     {
-        return buffer_t(data, data + size);
+        f_serializer.start_subfield(name);
+    }
+
+    ~recursive()
+    {
+        f_serializer.end_subfield();
     }
 
 private:
-    void verify_size(std::size_t expected_size, std::size_t buffer_size)
+    serializer<S> &     f_serializer;
+};
+
+
+
+
+
+
+
+
+/** \brief When deserializing, the data is saved in a field.
+ *
+ * This field holds the data of one field.
+ */
+struct field_t
+{
+    void reset()
     {
-        if(expected_size != buffer_size)
-        {
-            throw brs_logic_error("unexpected size, wrong type?");
-        }
+        f_name.clear();
+        f_sub_name.clear();
+        f_index = -1;
+        f_size = 0;
     }
+
+    std::string     f_name = std::string();
+    std::string     f_sub_name = std::string();
+    int             f_index = -1;
+    std::size_t     f_size = 0;         // size of the data (still in stream)
 };
 
 
@@ -299,78 +456,158 @@ private:
  *
  * \return true if the unserialization succeeded, false otherwise.
  */
-template<typename T>
-bool unserialize_buffer(
-          buffer_t const & buffer
-        , snapdev::callback_manager<T> & callback
-        , bool includes_magic)
+template<typename S>
+class deserializer
 {
-    std::size_t pos(0);
+public:
+    typedef std::function<bool(deserializer<S> &, field_t const &)>    process_hunk_t;
 
-    if(includes_magic)
+    deserializer(S & input)
+        : f_input(input)
     {
-        if(sizeof(magic_t) > buffer.size())
+        magic_t magic = {};
+        f_input.read(reinterpret_cast<typename S::char_type *>(&magic), sizeof(magic));
+        if(!f_input || f_input.gcount() != sizeof(magic))
         {
-            return false;
+            throw brs_magic_missing("magic missing from the start of the buffer.");
         }
 
-#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-        magic_t const magic((buffer[0] << 24) | (buffer[1] << 16) | (buffer[2] << 8) | (buffer[3] << 0));
-#else
-        magic_t const magic((buffer[0] << 0) | (buffer[1] << 8) | (buffer[2] << 16) | (buffer[3] << 24));
-#endif
-        pos += sizeof(magic_t);
-
+        // once we have multiple versions, this is where we'll start splitting
+        // hairs to make it all work; for now, we have one so it's easy
+        //
         if(magic != BRS_MAGIC)
         {
-            return false;
+            throw brs_magic_unsupported("magic unsupported.");
         }
     }
 
-    int index(-1);
-    for(;;)
+
+    bool deserialize(process_hunk_t & callback)
     {
-        if(pos + sizeof(hunk_sizes_t) > buffer.size())
+        for(;;)
         {
-            return pos == buffer.size();
-        }
+            hunk_sizes_t hunk_sizes = {};
+            f_input.read(reinterpret_cast<typename S::char_type *>(&hunk_sizes), sizeof(hunk_sizes));
+            if(!f_input || f_input.gcount() != sizeof(hunk_sizes))
+            {
+                return f_input.eof() && f_input.gcount() == 0;
+            }
 
-        hunk_sizes_t const * hunk_sizes(reinterpret_cast<hunk_sizes_t const *>(buffer.data() + pos));
-        pos += sizeof(hunk_sizes_t);
+            f_field.reset();
+            f_field.f_size = hunk_sizes.f_hunk;
 
-        if(hunk_sizes->f_index == 1)
-        {
-            if(pos + sizeof(std::uint16_t) > buffer.size())
+            switch(hunk_sizes.f_type)
+            {
+            case TYPE_FIELD:
+                if(hunk_sizes.f_name == 0
+                && hunk_sizes.f_hunk == 0)
+                {
+                    // we found an "end sub-field" entry
+                    //
+                    return true;
+                }
+                break;
+
+            case TYPE_ARRAY:
+                {
+                    std::uint16_t idx(0);
+                    f_input.read(reinterpret_cast<typename S::char_type *>(&idx), sizeof(idx));
+                    if(!f_input || f_input.gcount() != sizeof(idx))
+                    {
+                        return false;
+                    }
+                    f_field.f_index = idx;
+                }
+                break;
+
+            case TYPE_MAP:
+                {
+                    std::uint8_t len(0);
+                    f_input.read(reinterpret_cast<typename S::char_type *>(&len), sizeof(len));
+                    if(!f_input || f_input.gcount() != sizeof(len))
+                    {
+                        return false;
+                    }
+                    if(len == 0)
+                    {
+                        throw brs_map_name_cannot_be_empty("the length of a map's field name cannot be zero.");
+                    }
+                    f_field.f_sub_name.resize(len);
+                    f_input.read(reinterpret_cast<typename S::char_type *>(f_field.f_sub_name.data()), len);
+                    if(!f_input || f_input.gcount() != len)
+                    {
+                        return false;
+                    }
+                }
+                break;
+
+            default:
+                throw brs_unknown_type("read a field with an unknown type.");
+
+            }
+
+            f_field.f_name.resize(hunk_sizes.f_name);
+            f_input.read(reinterpret_cast<typename S::char_type *>(f_field.f_name.data()), hunk_sizes.f_name);
+            if(!f_input || f_input.gcount() != hunk_sizes.f_name)
             {
                 return false;
             }
 
-            std::uint16_t const * idx(reinterpret_cast<std::uint16_t const *>(buffer.data() + pos));
-            pos += sizeof(std::uint16_t);
-
-            index = *idx;
+            callback(*this, f_field);
         }
-        else
-        {
-            index = -1;
-        }
-
-        if(pos + hunk_sizes->f_name + hunk_sizes->f_hunk > buffer.size())
-        {
-            return false;
-        }
-
-        std::string const name(std::string(
-                      reinterpret_cast<char const *>(buffer.data() + pos)
-                    , hunk_sizes->f_name));
-        pos += hunk_sizes->f_name;
-
-        std::uint8_t const * ptr(reinterpret_cast<std::uint8_t const *>(buffer.data() + pos));
-        pos += hunk_sizes->f_hunk;
-
-        callback.call(&brs_object::process_chunk, name, ptr, hunk_sizes->f_hunk, index);
     }
-}
+
+    template<typename T>
+    bool read_data(T & data)
+    {
+        if(f_field.f_size != sizeof(data))
+        {
+            throw brs_logic_error(
+                      "hunk size is "
+                    + std::to_string(f_field.f_size)
+                    + ", but you are trying to read "
+                    + std::to_string(sizeof(data))
+                    + '.');
+        }
+
+        f_input.read(reinterpret_cast<typename S::char_type *>(&data), sizeof(data));
+        return verify_size(sizeof(data));
+    }
+
+    bool read_data(std::string & data)
+    {
+        data.resize(f_field.f_size);
+        f_input.read(reinterpret_cast<typename S::char_type *>(data.data()), f_field.f_size);
+        return verify_size(f_field.f_size);
+    }
+
+    template<typename T>
+    bool read_data(std::vector<T> & data)
+    {
+        if(f_field.f_size % sizeof(data.value_type) != 0)
+        {
+            throw brs_logic_error(
+                      "hunk size ("
+                    + std::to_string(f_field.f_size)
+                    + ") is not a multiple of the vector item size: "
+                    + std::to_string(sizeof(data.value_type))
+                    + '.');
+        }
+
+        data.resize(f_field.f_size / sizeof(data.value_type));
+        f_input.read(reinterpret_cast<typename S::char_type *>(data.data()), f_field.f_size);
+        return verify_size(f_field.f_size);
+    }
+
+private:
+    bool verify_size(std::size_t expected_size)
+    {
+        return f_input && static_cast<ssize_t>(expected_size) != f_input.gcount();
+    }
+
+    S &         f_input;
+    field_t     f_field = field_t();
+};
 
 
 

@@ -316,6 +316,15 @@ public:
     }
 
 
+    void add_value_if_not_empty(name_t name, std::string const & value)
+    {
+        if(!value.empty())
+        {
+            add_value(name, value.c_str(), value.length());
+        }
+    }
+
+
     void add_value(name_t name, int index, std::string const & value)
     {
         add_value(name, index, value.c_str(), value.length());
@@ -325,6 +334,15 @@ public:
     void add_value(name_t name, name_t sub_name, std::string const & value)
     {
         add_value(name, sub_name, value.c_str(), value.length());
+    }
+
+
+    void add_value_if_not_empty(name_t name, name_t sub_name, std::string const & value)
+    {
+        if(!value.empty())
+        {
+            add_value(name, sub_name, value.c_str(), value.length());
+        }
     }
 
 

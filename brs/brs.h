@@ -82,9 +82,9 @@ constexpr version_t const       BRS_VERSION = 1;    // version of the format
 constexpr magic_t build_magic(char endian)
 {
 #if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-    return ('B' << 24) | ('R' << 16) | (endian <<  8) | (static_cast<char const>(BRS_VERSION) <<  0);
+    return ('B' << 24) | ('R' << 16) | (endian <<  8) | (static_cast<unsigned char>(BRS_VERSION) <<  0);
 #else
-    return ('B' <<  0) | ('R' <<  8) | (endian << 16) | (static_cast<char const>(BRS_VERSION) << 24);
+    return ('B' <<  0) | ('R' <<  8) | (endian << 16) | (static_cast<unsigned char>(BRS_VERSION) << 24);
 #endif
 }
 

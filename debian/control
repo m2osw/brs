@@ -4,7 +4,6 @@ Maintainer: Alexis Wilke <alexis@m2osw.com>
 Build-Depends: cmake,
     debhelper,
     doxygen,
-    edhttp (>= 0.1.0.0~bionic),
     graphviz,
     snapcatch2 (>= 2.9.1.0~bionic),
     snapcmakemodules (>= 1.0.49.0~bionic),

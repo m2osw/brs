@@ -24,9 +24,9 @@
 #include    "catch_main.h"
 
 
-// edhttp lib
+// brs lib
 //
-#include    <edhttp/version.h>
+#include    <brs/version.h>
 
 
 // libexcept lib
@@ -65,8 +65,8 @@ int main(int argc, char * argv[])
     l->set_severity(snaplogger::severity_t::SEVERITY_ALL);
 
     return SNAP_CATCH2_NAMESPACE::snap_catch2_main(
-              "edhttp"
-            , EDHTTP_VERSION_STRING
+              "brs"
+            , BRS_VERSION_STRING
             , argc
             , argv
             , []() { libexcept::set_collect_stack(libexcept::collect_stack_t::COLLECT_STACK_NO); }

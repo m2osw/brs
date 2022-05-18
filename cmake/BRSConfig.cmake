@@ -1,11 +1,9 @@
-# - Try to find LibMimeMail
+# - Find BRS
 #
-# Once done this will define
-#
-# BRS_FOUND        - System has LibMimeMail
-# BRS_INCLUDE_DIRS - The LibMimeMail include directories
-# BRS_LIBRARIES    - The libraries needed to use LibMimeMail
-# BRS_DEFINITIONS  - Compiler switches required for using LibMimeMail
+# BRS_FOUND        - System has BRS
+# BRS_INCLUDE_DIRS - The BRS include directories
+# BRS_LIBRARIES    - The libraries needed to use BRS
+# BRS_DEFINITIONS  - Compiler switches required for using BRS
 #
 # License:
 #
@@ -32,7 +30,7 @@ find_path(
         brs/version.h
 
     PATHS
-        $ENV{BRS_INCLUDE_DIR}
+        ENV BRS_INCLUDE_DIR
 )
 
 find_library(
@@ -40,7 +38,8 @@ find_library(
         brs
 
     PATHS
-        $ENV{BRS_LIBRARY}
+        ${BRS_LIBRARY_DIR}
+        ENV BRS_LIBRARY
 )
 
 mark_as_advanced(
@@ -51,15 +50,13 @@ mark_as_advanced(
 set(BRS_INCLUDE_DIRS ${BRS_INCLUDE_DIR})
 set(BRS_LIBRARIES    ${BRS_LIBRARY})
 
-include(FindPackageHandleStandardArgs)
 
-# handle the QUIETLY and REQUIRED arguments and set BRS_FOUND to
-# TRUE if all listed variables are TRUE
+include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(
     BRS
-    DEFAULT_MSG
-    BRS_INCLUDE_DIR
-    BRS_LIBRARY
+    REQUIRED_VARS
+        BRS_INCLUDE_DIR
+        BRS_LIBRARY
 )
 
 # vim: ts=4 sw=4 et
